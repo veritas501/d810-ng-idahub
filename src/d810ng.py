@@ -73,10 +73,20 @@ class D810Plugin(
             print(f"{self.wanted_name} need Hex-Rays decompiler. Skipping")
             return idaapi.PLUGIN_SKIP
 
-        kv = ida_kernwin.get_kernel_version().split(".")
-        if (int(kv[0]) < 7) or ((int(kv[0]) == 7) and (int(kv[1]) < 5)):
-            print(f"{self.wanted_name} need IDA version >= 7.5. Skipping")
-            return idaapi.PLUGIN_SKIP
+        # Version check — skip in headless mode (idat64) where
+        # ida_kernwin may have limited API surface.
+        import os
+        is_headless = os.environ.get("D810_HEADLESS", "0") == "1"
+        if not is_headless:
+            try:
+                kv = ida_kernwin.get_kernel_version().split(".")
+                if (int(kv[0]) < 7) or ((int(kv[0]) == 7) and (int(kv[1]) < 5)):
+                    print(f"{self.wanted_name} need IDA version >= 7.5. Skipping")
+                    return idaapi.PLUGIN_SKIP
+            except (AttributeError, ValueError):
+                # ida_kernwin limited in headless — skip version check
+                pass
+
         return super().init()
 
     @override
