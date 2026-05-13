@@ -790,10 +790,12 @@ class D810ConfigForm_t(ida_kernwin.PluginForm):
     def update_cfg_select(self):
         logger.debug("Calling update_cfg_select")
         tmp = self.state.current_project_index
+        self.cfg_select.blockSignals(True)
         self.cfg_select.clear()
         # Display basename for readability
         self.cfg_select.addItems(self.state.project_manager.project_names())
         self.cfg_select.setCurrentIndex(tmp)
+        self.cfg_select.blockSignals(False)
 
     # =========================================================================
     # Edit state machine
@@ -1007,6 +1009,9 @@ class D810ConfigForm_t(ida_kernwin.PluginForm):
 
     # Called when the edit combo is changed
     def _load_config(self, index: int):
+        if index < 0:
+            logger.debug("Ignoring _load_config call with invalid index %d", index)
+            return
         if logger.debug_on:
             projects = self.state.project_manager.projects()
             logger.debug(
