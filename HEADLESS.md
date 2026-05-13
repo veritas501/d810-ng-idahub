@@ -4,23 +4,52 @@ Script-driven deobfuscation without IDA GUI. For use with `idat64`, ida-hub, or 
 
 ## Installation
 
-d810-ng must be installed into IDA Pro's Python environment.
+d810-ng must be installed into IDA Pro's Python environment, and the plugin entry-point (`d810ng.py`) must be placed in IDA's `plugins/` directory.
+
+### Quick Install (Recommended)
+
+The install script auto-detects your IDA Pro installation:
 
 ```bash
-# Locate IDA's bundled Python
+python tools/install_headless.py
+```
+
+It will:
+1. Detect IDA directory (via `IDADIR` env var, `idat64`/`ida64` in PATH, or common install paths)
+2. Install d810-ng into IDA's bundled Python (`pip install`)
+3. Copy `d810ng.py` to IDA's `plugins/` directory
+
+If auto-detection fails, specify the IDA directory manually:
+
+```bash
+python tools/install_headless.py --ida-dir ~/ida-pro-9.3
+```
+
+Options:
+
+| Flag | Description |
+|------|-------------|
+| `--ida-dir PATH` | IDA Pro install directory (skip auto-detection) |
+| `--skip-pip` | Only copy plugin file, skip pip install |
+| `--skip-plugin-copy` | Only pip install, skip plugin file copy |
+
+### Manual Install
+
+```bash
+# 1. Locate IDA's bundled Python
 IDA_PYTHON=~/ida-pro-9.3/python_standalone/bin/python3
 
-# Install d810-ng (editable, so code changes take effect immediately)
-$IDA_PYTHON -m pip install -e /path/to/d810-ng
+# 2. Install d810-ng
+$IDA_PYTHON -m pip install /path/to/d810-ng
 
-# Install z3 (required for MBA constraint solving)
-$IDA_PYTHON -m pip install z3-solver
+# 3. Copy plugin entry-point to IDA's plugins directory
+cp /path/to/d810-ng/src/d810ng.py ~/ida-pro-9.3/plugins/
 
-# Verify
+# 4. Verify
 $IDA_PYTHON -c "from d810.headless import start, stop, configure, status; print('OK')"
 ```
 
-For ida-hub or other agents: replace paths with your actual IDA install location and d810-ng source path.
+Replace paths with your actual IDA install location and d810-ng source path.
 
 ## API Reference
 
