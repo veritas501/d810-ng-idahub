@@ -171,18 +171,45 @@ class Z3VerificationEngine:
         bit_width = options.bit_width if options else 32
         timeout_ms = options.timeout_ms if options else 0
 
-        # Apply timeout if specified
+        # Create solver with per-instance timeout (never use z3.set_option
+        # which modifies process-global state and conflicts with other plugins).
+        solver = z3.Solver()
         if timeout_ms > 0:
-            z3.set_option("timeout", timeout_ms)
+            try:
+                solver.set(timeout=timeout_ms)
+            except Exception as e:
+                logger.warning("Failed to set solver timeout: %s", e)
 
-        # Delegate to the module-level function
-        return prove_equivalence(
-            pattern,
-            replacement,
-            z3_vars=variables,
-            constraints=constraints,
-            bit_width=bit_width
-        )
+        if constraints:
+            for constraint in constraints:
+                solver.add(constraint)
+
+        # Convert expressions to Z3
+        visitor = Z3VerificationVisitor(bit_width=bit_width, var_map=variables)
+        try:
+            pattern_z3 = visitor.visit(pattern)
+            replacement_z3 = visitor.visit(replacement)
+        except Exception:
+            return False, None
+
+        solver.add(pattern_z3 != replacement_z3)
+        result = solver.check()
+
+        if result == z3.unsat:
+            return True, None
+
+        if result == z3.sat:
+            model = solver.model()
+            counterexample = {}
+            for name, z3_var in visitor.get_variables().items():
+                value = model.eval(z3_var, model_completion=True)
+                if hasattr(value, 'as_long'):
+                    counterexample[name] = value.as_long()
+                else:
+                    counterexample[name] = str(value)
+            return False, counterexample
+
+        return False, None
 
 
 # =============================================================================
