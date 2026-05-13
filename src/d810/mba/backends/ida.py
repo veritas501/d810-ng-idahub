@@ -786,6 +786,15 @@ class IDAPatternAdapter:
             try:
                 # Check if this is a ConstraintExpr
                 if is_constraint_expr(constraint):
+                    # Try eval_and_define first (for computed replacement constants
+                    # like bnot_c_1 == ~c_1 where bnot_c_1 is not in the pattern)
+                    if hasattr(constraint, 'eval_and_define'):
+                        var_name, value = constraint.eval_and_define(match_context)
+                        if var_name is not None:
+                            import importlib
+                            _p_ast = importlib.import_module("d810.expr.p_ast")
+                            match_context[var_name] = _p_ast.AstConstant(var_name, value)
+                            continue
                     if not constraint.check(match_context):
                         return False
                 elif callable(constraint):
