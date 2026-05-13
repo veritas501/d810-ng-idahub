@@ -120,6 +120,8 @@ class Xor_HackersDelightRule_1(VerifiableRule):
 
 Rules marked `SKIP_VERIFICATION = True` (e.g. microcode-type checks or very slow Z3 cases) are exempt but must be documented.
 
+> **Want more?** See [CUSTOM_RULE.md](CUSTOM_RULE.md) for a complete guide — DSL rules with constraints, `optinsn_t` hooks for semantic matching, and dynamic runtime injection via ida-hub.
+
 ### Rule Maturity System
 
 D-810 rules fire at specific IDA microcode maturity levels. Each rule declares which maturities it targets; the optimizer calls rules only at the declared levels.
