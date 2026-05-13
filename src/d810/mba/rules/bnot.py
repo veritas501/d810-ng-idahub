@@ -353,6 +353,27 @@ class Bnot_Rule_1(VerifiableRule):
     REFERENCE = "Absorption with NOT"
 
 
+class Bnot_FactorRule_5(VerifiableRule):
+    """Simplify: ~(~x ^ y) => x ^ y
+
+    NOT distributes into XOR by flipping one operand:
+        ~(a ^ b) = ~a ^ b = a ^ ~b
+    Therefore: ~(~x ^ y) = ~~x ^ y = x ^ y
+
+    Common in obfuscated code such as: byte = ~(~byte ^ 0x53)
+    which is equivalent to: byte ^= 0x53
+    """
+    maturities = _ALL_MATURITIES
+
+    PATTERN = ~(bnot_x ^ y)
+    REPLACEMENT = x ^ y
+
+    CONSTRAINTS = [bnot_x == ~x]
+
+    DESCRIPTION = "Simplify ~(~x ^ y) to x ^ y"
+    REFERENCE = "NOT distribution over XOR"
+
+
 # ============================================================================
 # Summary
 # ============================================================================
