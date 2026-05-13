@@ -278,7 +278,7 @@ RULES: list[RuleInfo] = [
     ),
     RuleInfo(
         name="Bnot_FactorRule_5",
-        expr="(~(bnot_x_0 ^ x_1)) => (x_0 ^ x_1)",
+        expr="(~(~(x_0) ^ x_1)) => (x_0 ^ x_1)",
         known_incorrect=False,
         comment=None,
     ),

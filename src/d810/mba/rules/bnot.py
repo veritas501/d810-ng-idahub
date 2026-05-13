@@ -365,10 +365,8 @@ class Bnot_FactorRule_5(VerifiableRule):
     """
     maturities = _ALL_MATURITIES
 
-    PATTERN = ~(bnot_x ^ y)
+    PATTERN = ~(~x ^ y)
     REPLACEMENT = x ^ y
-
-    CONSTRAINTS = [bnot_x == ~x]
 
     DESCRIPTION = "Simplify ~(~x ^ y) to x ^ y"
     REFERENCE = "NOT distribution over XOR"
