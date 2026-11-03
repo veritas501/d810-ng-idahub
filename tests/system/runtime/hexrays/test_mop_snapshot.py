@@ -98,3 +98,62 @@ class TestMopSnapshotProperties:
         import ida_hexrays
         snap = MopSnapshot(t=ida_hexrays.mop_n, size=4, value=42)
         assert snap.is_register is False
+
+
+@pytest.mark.ida_required
+@pytest.mark.usefixtures("ida_database", "configure_hexrays")
+class TestMopSnapshotToMop:
+    """Test that to_mop() reconstructs a real mop_t from a snapshot.
+
+    The mop_v branch in particular must work on Hex-Rays 9.x SDKs where
+    ``mop_t.make_global`` is not exposed (issue #44). Other branches are
+    sanity-checked to guard against the same class of SDK drift.
+    """
+
+    # to_mop() calls mop_t.make_*(), which needs a live Hex-Rays context. With no
+    # open database those calls segfault on IDA 9.2 (a context-free call only
+    # tolerated on 9.3). Open the sample DLL like every other runtime test so the
+    # reconstruction runs against a real decompiler.
+    binary_name = "libobfuscated.dll"
+
+    def test_to_mop_global_reconstructs_mop_v(self):
+        """mop_v branch — guards against missing mop_t.make_global (#44)."""
+        import ida_hexrays
+        snap = MopSnapshot(
+            t=ida_hexrays.mop_v, size=8, gaddr=0x140001000
+        )
+        m = snap.to_mop()
+        assert isinstance(m, ida_hexrays.mop_t)
+        assert m.t == ida_hexrays.mop_v
+        assert m.g == 0x140001000
+        assert m.size == 8
+
+    def test_to_mop_number_reconstructs_mop_n(self):
+        import ida_hexrays
+        snap = MopSnapshot(t=ida_hexrays.mop_n, size=4, value=0xDEADBEEF)
+        m = snap.to_mop()
+        assert m.t == ida_hexrays.mop_n
+        assert m.size == 4
+        assert m.nnn.value == 0xDEADBEEF
+
+    def test_to_mop_register_reconstructs_mop_r(self):
+        import ida_hexrays
+        snap = MopSnapshot(t=ida_hexrays.mop_r, size=8, reg=16)
+        m = snap.to_mop()
+        assert m.t == ida_hexrays.mop_r
+        assert m.size == 8
+        assert m.r == 16
+
+    def test_to_mop_helper_reconstructs_mop_h(self):
+        import ida_hexrays
+        snap = MopSnapshot(t=ida_hexrays.mop_h, size=0, helper_name="memcpy")
+        m = snap.to_mop()
+        assert m.t == ida_hexrays.mop_h
+        assert m.helper == "memcpy"
+
+    def test_to_mop_blkref_reconstructs_mop_b(self):
+        import ida_hexrays
+        snap = MopSnapshot(t=ida_hexrays.mop_b, size=0, block_num=7)
+        m = snap.to_mop()
+        assert m.t == ida_hexrays.mop_b
+        assert m.b == 7
