@@ -190,6 +190,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum, auto
+from collections.abc import Callable
 
 from d810.core.typing import TYPE_CHECKING
 import os
@@ -352,6 +353,9 @@ class GraphModification:
     conditional_target: int | None = None
     # For BLOCK_CREATE_WITH_CONDITIONAL_REDIRECT: fallthrough target
     fallthrough_target: int | None = None
+    # Optional proof supplied by the producer. Rechecked on the current CFG,
+    # after preceding queued edits, before any mutation for this operation.
+    precondition: Callable[[], bool] | None = field(default=None, repr=False, compare=False)
 
 
 @dataclass
@@ -953,6 +957,8 @@ class DeferredGraphModifier:
         for i, mod in enumerate(sorted_mods):
             blk = self.mba.get_mblock(mod.block_serial)
             logger.info("--- Applying [%d]: %s ---", i, mod.description)
+            if not self._precondition_holds(mod):
+                continue
             logger.info("    BEFORE: %s", _format_block_info(blk))
             if self._is_watched_edge(mod.block_serial, mod.new_target):
                 logger.warning(
@@ -1263,8 +1269,22 @@ class DeferredGraphModifier:
 
         return None
 
+    def _precondition_holds(self, mod: GraphModification) -> bool:
+        """A stale proof is a no-op, not a partially failed CFG mutation."""
+        if mod.precondition is not None:
+            try:
+                valid = mod.precondition()
+            except Exception:
+                logger.warning("Precondition could not be revalidated: %s",
+                               mod.description, exc_info=True)
+                return False
+            if not valid:
+                logger.info("Skipping stale CFG modification: %s", mod.description)
+                return False
+        return True
+
     def _apply_single(self, mod: GraphModification) -> bool:
-        """Apply a single modification. Returns True on success."""
+        """Apply a single modification after apply() checks its precondition."""
         blk = self.mba.get_mblock(mod.block_serial)
         if blk is None:
             logger.warning("Block %d not found", mod.block_serial)

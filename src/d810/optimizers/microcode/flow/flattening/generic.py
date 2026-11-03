@@ -1988,6 +1988,39 @@ class GenericDispatcherUnflatteningRule(GenericUnflatteningRule):
 
         return safe_copy_insns
 
+    def _make_dispatcher_precondition(
+        self, father, dispatcher_info, expected_values
+    ):
+        """Freeze the proof at enqueue time; do not retain cached histories.
+
+        Later dispatcher duplication can add paths to this same father before
+        deferred edits are applied. A formerly constant state is not sufficient
+        evidence for redirecting that expanded set of paths.
+        """
+        father_serial = father.serial
+        expected = tuple(expected_values)
+        source_successors = tuple(father.succset)
+
+        def revalidate():
+            current = self.mba.get_mblock(father_serial)
+            if current is None or tuple(current.succset) != source_successors:
+                return False
+            histories = self.get_dispatcher_father_histories(
+                current, dispatcher_info.entry_block, dispatcher_info
+            )
+            if not histories or not self.check_if_histories_are_resolved(histories):
+                return False
+            values = get_all_possibles_values(
+                histories, dispatcher_info.entry_block.use_before_def_list,
+                verbose=False,
+            )
+            if (not values or not check_if_all_values_are_found(values)
+                    or any(tuple(value) != expected for value in values)):
+                return False
+            return True
+
+        return revalidate
+
     def resolve_dispatcher_father(
         self,
         dispatcher_father: ida_hexrays.mblock_t,
@@ -2201,6 +2234,7 @@ class GenericDispatcherUnflatteningRule(GenericUnflatteningRule):
                     )
 
             if deferred_modifier is not None:
+                first_queued = len(deferred_modifier.modifications)
                 queued_change = False
                 source_nsucc = dispatcher_father.nsucc()
                 tail_opcode = dispatcher_father.tail.opcode if dispatcher_father.tail else None
@@ -2365,6 +2399,11 @@ class GenericDispatcherUnflatteningRule(GenericUnflatteningRule):
                         )
                 if not queued_change:
                     return 0
+                precondition = self._make_dispatcher_precondition(
+                    dispatcher_father, dispatcher_info, ref_mop_searched_values,
+                )
+                for modification in deferred_modifier.modifications[first_queued:]:
+                    modification.precondition = precondition
             else:
                 # Legacy direct CFG modifications
                 if len(ins_to_copy) > 0:

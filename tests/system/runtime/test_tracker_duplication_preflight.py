@@ -15,6 +15,8 @@ import idautils
 
 from d810.hexrays import tracker
 from d810.hexrays.cfg_utils import duplicate_block
+from d810.hexrays.deferred_modifier import DeferredGraphModifier
+from d810.optimizers.microcode.flow.flattening import generic
 
 pytestmark = [pytest.mark.requires_ida, pytest.mark.runtime]
 
@@ -109,3 +111,92 @@ def test_conditional_copy_has_adjacent_unique_fallthrough():
         assert ins.ea not in original_eas
         ins = ins.next
     mba.verify(True)
+
+
+@pytest.mark.parametrize("raises", [False, True])
+def test_stale_precondition_skips_without_aborting_batch(raises):
+    mba, _, _ = conditional_mba()
+    sources = [mba.get_mblock(i) for i in range(mba.qty)
+               if mba.get_mblock(i).nsucc() == 1][:2]
+    assert len(sources) == 2
+    modifier = DeferredGraphModifier(mba)
+    first, second = sources
+    modifier.queue_goto_change(first.serial, first.succset[0])
+    modifier.queue_goto_change(second.serial, second.succset[0])
+    calls = []
+
+    def stale():
+        calls.append("stale")
+        if raises:
+            raise RuntimeError("state cannot be recovered")
+        return False
+
+    def valid():
+        calls.append("valid")
+        return True
+
+    modifier.modifications[0].precondition = stale
+    modifier.modifications[1].precondition = valid
+    before = graph_snapshot(mba)[first.serial]
+    assert modifier.apply(run_optimize_local=False, run_deep_cleaning=False,
+                          defer_post_apply_maintenance=True) == 1
+    assert calls == ["stale", "valid"]
+    assert graph_snapshot(mba)[first.serial] == before
+    assert not modifier.verify_failed
+    mba.verify(True)
+
+
+@pytest.mark.parametrize("current", [[], [[None]], [[2]], [[1], [2]]])
+def test_dispatcher_proof_rechecks_current_histories(monkeypatch, current):
+    mba, _, _ = conditional_mba()
+    father = next(mba.get_mblock(i) for i in range(mba.qty)
+                  if mba.get_mblock(i).nsucc() == 1)
+    values = [[1]]
+    queried = []
+    info = SimpleNamespace(entry_block=SimpleNamespace(use_before_def_list=[]))
+
+    def histories(*args):
+        queried.append(True)
+        return [object()]
+
+    producer = SimpleNamespace(mba=mba, get_dispatcher_father_histories=histories,
+                               check_if_histories_are_resolved=lambda _: True)
+    monkeypatch.setattr(generic, "get_all_possibles_values", lambda *a, **kw: values)
+    proof = generic.GenericDispatcherUnflatteningRule._make_dispatcher_precondition(
+        producer, father, info, [1]
+    )
+    assert proof()
+    values = current
+    assert not proof()
+    assert len(queried) == 2
+
+
+def test_jni_onload_default_unflattening():
+    """Requires the table/CC JNI_OnLoad IDB; never substitute a null stub."""
+    requested = os.environ.get("D810_JNI_ONLOAD_TEST_EA")
+    if not requested:
+        pytest.skip("Set D810_JNI_ONLOAD_TEST_EA with the table/CC IDB loaded")
+    from d810.manager import D810State
+
+    state = D810State()
+    state.stop_d810()
+    state.load_project(state.project_manager.index("default_unflattening_ollvm.json"))
+    rule = next(r for r in state.current_blk_rules if r.name == "Unflattener")
+    assert rule.max_duplication_passes == 20
+    assert rule.config["min_dispatcher_internal_block"] == 1
+    assert rule.config["min_dispatcher_exit_block"] == 2
+    assert rule.config["min_dispatcher_comparison_value"] == 1
+    state.start_d810()
+    try:
+        for _ in range(2):
+            failure = ida_hexrays.hexrays_failure_t()
+            cf = ida_hexrays.decompile(int(requested, 0), failure,
+                                      ida_hexrays.DECOMP_NO_CACHE)
+            assert cf is not None, failure.str
+            text = str(cf)
+            assert "GetEnv" in text
+            assert "return -1;" in text and "return 65540;" in text
+            assert "for (" not in text and "while (" not in text
+            assert "return (int)vm" not in text and "JUMPOUT" not in text
+    finally:
+        state.stop_d810()
