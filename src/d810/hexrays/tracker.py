@@ -965,6 +965,23 @@ def try_to_duplicate_one_block(var_histories: list[MopHistory]) -> tuple[int, in
     block_to_duplicate, pred_dict = get_block_with_multiple_predecessors(var_histories)
     if block_to_duplicate is None or pred_dict is None:
         return nb_duplication, nb_change
+    # Preflight every edge before copying anything. Conditional fallthrough
+    # requires a physically adjacent bridge; the conditional-target helper
+    # below cannot redirect it. Skipping only the redirect after copy_block()
+    # leaves orphan copies and, worse, rewrites histories to paths that do not
+    # exist in the CFG. Reject this duplication round without mutation instead.
+    for pred_serial in list(pred_dict)[1:]:
+        pred = mba.get_mblock(pred_serial)
+        if pred.tail is not None and ida_hexrays.is_mcode_jcond(pred.tail.opcode):
+            if pred.nsucc() != 2 or pred.tail.d.b != block_to_duplicate.serial:
+                logger.warning(
+                    "Cannot duplicate block %d: predecessor %d requires a "
+                    "conditional fallthrough redirect; leaving CFG and histories unchanged",
+                    block_to_duplicate.serial, pred.serial,
+                )
+                return 0, 0
+        elif pred.nsucc() != 1:
+            return 0, 0
     logger.debug(
         "Block to duplicate found: {0} with {1} successors".format(
             block_to_duplicate.serial, block_to_duplicate.nsucc()
@@ -997,20 +1014,17 @@ def try_to_duplicate_one_block(var_histories: list[MopHistory]) -> tuple[int, in
             if (pred_block.tail is None) or (
                 not ida_hexrays.is_mcode_jcond(pred_block.tail.opcode)
             ):
-                if change_1way_block_successor(pred_block, duplicated_blk_jmp.serial, verify=False):
-                    nb_change += 1
+                redirected = change_1way_block_successor(
+                    pred_block, duplicated_blk_jmp.serial, verify=False
+                )
             else:
-                if block_to_duplicate.serial == pred_block.tail.d.b:
-                    if change_2way_block_conditional_successor(
-                        pred_block, duplicated_blk_jmp.serial, verify=False
-                    ):
-                        nb_change += 1
-                else:
-                    logger.warning(
-                        "pred %d is jcond but target %d is fallthrough (not cond target %d), "
-                        "skipping redirect",
-                        pred_block.serial, block_to_duplicate.serial, pred_block.tail.d.b,
-                    )
+                redirected = change_2way_block_conditional_successor(
+                    pred_block, duplicated_blk_jmp.serial, verify=False
+                )
+            if not redirected:
+                # Do not claim a path was rewired when the CFG helper refused it.
+                continue
+            nb_change += 1
 
             block_to_duplicate_default_successor = mba.get_mblock(
                 block_to_duplicate.nextb.serial

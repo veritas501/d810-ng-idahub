@@ -1019,7 +1019,11 @@ def insert_nop_blk(blk: ida_hexrays.mblock_t) -> ida_hexrays.mblock_t:
     # shifts in the middle of the MBA.
     insert_after_blk = blk.nsucc() > 1
     if insert_after_blk:
-        nop_block = mba.copy_block(blk, blk.serial)
+        # copy_block inserts BEFORE its index, not after it. Inserting at
+        # blk.serial moves the conditional behind its own fallthrough bridge:
+        # succset then names a preceding block while nextb is the MBA sentinel.
+        # Hex-Rays rejects that graph (INTERR 50860).
+        nop_block = mba.copy_block(blk, blk.serial + 1)
         # Mid-CFG insertion can shift serials; refresh from the original block
         # object to keep bookkeeping tied to the same logical successor.
         if original_successor_blk is not None:
@@ -1105,7 +1109,10 @@ def insert_nop_blk(blk: ida_hexrays.mblock_t) -> ida_hexrays.mblock_t:
         # This keeps succ/pred bidirectional consistency and avoids detached
         # NOP blocks (preds=[]), which trigger INTERR 50856/50858.
         blk.succset._del(original_successor_serial)
-        blk.succset.push_back(nop_block.serial)
+        # Mid-array insertion may already have replaced the physical
+        # fallthrough with the inserted block. intvec_t is not a set.
+        if nop_block.serial not in blk.succset:
+            blk.succset.push_back(nop_block.serial)
         blk.mark_lists_dirty()
 
         original_successor_blk.predset._del(blk.serial)
@@ -1207,6 +1214,17 @@ def duplicate_block(block_to_duplicate: ida_hexrays.mblock_t, verify: bool = Tru
                 duplicated_blk.serial
             )
         )
+
+    # Distinguish cloned instructions from the original source instructions.
+    # Reusing their real EAs can pass mba.verify() but fail during ctree
+    # construction (INTERR 50342), notably for copies of split CSEL blocks.
+    # alloc_fict_ea preserves Hex-Rays' mapping back to the original EA.
+    for copied in (duplicated_blk, duplicated_blk_default):
+        if copied is not None:
+            ins = copied.head
+            while ins is not None:
+                ins.ea = mba.alloc_fict_ea(ins.ea)
+                ins = ins.next
 
     return duplicated_blk, duplicated_blk_default
 
